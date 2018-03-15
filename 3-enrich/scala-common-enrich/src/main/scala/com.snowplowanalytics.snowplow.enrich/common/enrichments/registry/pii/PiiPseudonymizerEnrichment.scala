@@ -65,7 +65,7 @@ object PiiPseudonymizerEnrichment extends ParseableEnrichment {
   def parse(config: JValue, schemaKey: SchemaKey): ValidatedNelMessage[PiiPseudonymizerEnrichment] = {
     for {
       conf <- matchesSchema(config, schemaKey)
-      emitIdentificationEvent = extract[Boolean](conf, "emitIdentificationEvent").toOption
+      emitIdentificationEvent = extract[Boolean](conf, "emitEvent").toOption
         .getOrElse(false)
       piiFields    <- extract[List[JObject]](conf, "parameters", "pii").leftMap(_.getMessage)
       piiStrategy  <- extractStrategy(config)
