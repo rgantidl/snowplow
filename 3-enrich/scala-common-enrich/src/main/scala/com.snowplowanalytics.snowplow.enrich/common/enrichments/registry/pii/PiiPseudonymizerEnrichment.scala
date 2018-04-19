@@ -29,8 +29,6 @@ import org.json4s.jackson.Serialization.write
 
 // Java
 import org.apache.commons.codec.digest.DigestUtils
-import com.amazonaws.services.simplesystemsmanagement.AWSSimpleSystemsManagementClientBuilder
-import com.amazonaws.services.simplesystemsmanagement.model.GetParameterRequest
 
 // Java libraries
 import com.fasterxml.jackson.databind.JsonNode
@@ -57,7 +55,7 @@ import common.outputs.EnrichedEvent
  */
 object PiiPseudonymizerEnrichment extends ParseableEnrichment {
 
-  implicit val formats = DefaultFormats + new PiiStrategyPseudonymizeSerializer + new PiiStrategyPseudonymizeSaltSerializer
+  implicit val formats = DefaultFormats + new PiiStrategyPseudonymizeSerializer
 
   override val supportedSchema =
     SchemaCriterion("com.snowplowanalytics.snowplow.enrichments", "pii_enrichment_config", "jsonschema", 2, 0, 0)
@@ -165,7 +163,6 @@ case class PiiPseudonymizerEnrichment(fieldList: List[PiiField],
     extends Enrichment {
   implicit val json4sFormats = DefaultFormats +
     new PiiModifiedFieldsSerializer +
-    new PiiStrategyPseudonymizeSaltSerializer +
     new PiiStrategyPseudonymizeSerializer
 
   def transformer(event: EnrichedEvent): Unit = {
@@ -288,24 +285,5 @@ private final class ScrambleMapFunction(strategy: PiiStrategy,
         case default: AnyRef => default
       }
     case default: AnyRef => default
-  }
-}
-
-/*
- * Getting the salt where the value is already known
- */
-private[pii] case class PiiStrategyPseudonymizeSaltPlainValue(salt: String) extends PiiStrategyPseudonymizeSalt {
-  val getSalt = salt
-}
-/*
- * Getting the salt where the value is stored in "AWS Systems Manager Parameter Store"
- */
-private[pii] case class PiiStrategyPseudonymizeSaltAWSParameterStore(parameterName: String)
-    extends PiiStrategyPseudonymizeSalt {
-  lazy val getSalt = {
-    val client                   = AWSSimpleSystemsManagementClientBuilder.defaultClient()
-    val req: GetParameterRequest = new GetParameterRequest().withName(parameterName).withWithDecryption(true)
-    val par                      = client.getParameter(req)
-    par.getParameter.getValue
   }
 }
