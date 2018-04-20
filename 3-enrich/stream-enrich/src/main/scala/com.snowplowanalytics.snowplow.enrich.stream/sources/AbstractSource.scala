@@ -34,6 +34,8 @@ import scalaz.{Sink => _, _}
 import Scalaz._
 import org.json4s.{ThreadLocal => _, _}
 import org.json4s.JsonDSL._
+import org.json4s.DefaultFormats
+import org.json4s.jackson.Serialization.write
 import org.json4s.jackson.JsonMethods._
 import org.joda.time.{DateTime, DateTimeZone}
 import org.joda.time.format.DateTimeFormat
@@ -193,10 +195,17 @@ abstract class AbstractSource(
         ee.event_format = PII_EVENT_FORMAT
         ee.event_name = PII_EVENT_NAME
         ee.event_version = PII_EVENT_VERSION
+        ee.contexts = getContextParentEvent(event.event_id)
         ee.v_etl =
           s"kinesis-${generated.Settings.version}-common-${generated.Settings.commonEnrichVersion}"
         ee
       })
+  private val CONTEXTS_SCHEMA = "iglu:com.snowplowanalytics.snowplow/contexts/jsonschema/1-0-0"
+  def getContextParentEvent(eventId: String): String = {
+    implicit val json4sFormats = DefaultFormats
+    write(("schema" -> CONTEXTS_SCHEMA) ~ ("data" -> List(
+      ("schema" -> "com.snowplowanalytics.snowplow/parent_event/jsonschema/1-0-0") ~ ("data" -> ("parentEventId" -> eventId)))))
+  }
 
   // Iterate through an enriched EnrichedEvent object and tab separate
   // the fields to a string.
