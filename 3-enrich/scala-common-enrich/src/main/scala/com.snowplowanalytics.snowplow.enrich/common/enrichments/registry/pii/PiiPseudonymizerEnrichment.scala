@@ -233,8 +233,8 @@ final case class PiiJson(fieldMutator: Mutator, schemaCriterion: SchemaCriterion
                                           strategy: PiiStrategy): (JObject, List[JsonModifiedField]) = {
     val fieldsObj = context.toMap
     (for {
-      schema <- fieldsObj.get("schema")
-      schemaStr = schema.extract[String]
+      schema              <- fieldsObj.get("schema")
+      schemaStr           <- schema.extractOpt[String]
       parsedSchemaMatches <- SchemaKey.parse(schemaStr).map(schemaCriterion.matches).toOption
       data                <- fieldsObj.get("data")
       if parsedSchemaMatches
