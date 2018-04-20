@@ -61,8 +61,6 @@ object Dependencies {
     val scalaj           = "2.3.0"
     val gatlingJsonpath  = "0.6.4"
     val scalaUri         = "0.5.0"
-    // Java
-    val aws              = "1.11.290"
     // Scala (test only)
     val specs2           = "2.3.13"
     val scalazSpecs2     = "0.2"
