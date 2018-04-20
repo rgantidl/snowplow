@@ -197,40 +197,34 @@ final case class PiiScalar(fieldMutator: Mutator) extends PiiField {
 final case class PiiJson(fieldMutator: Mutator, schemaCriterion: SchemaCriterion, jsonPath: String) extends PiiField {
   implicit val json4sFormats = DefaultFormats
 
-  override def applyStrategy(fieldValue: String, strategy: PiiStrategy): (String, ModifiedFields) = {
-    val modifiedFields = MutableList[JsonModifiedField]()
+  override def applyStrategy(fieldValue: String, strategy: PiiStrategy): (String, ModifiedFields) =
     if (fieldValue != null) {
-      val parsedAndSubistuted = parse(fieldValue) match {
-        case JObject(jObject) =>
-          val jObjectMap = jObject.toMap
-          val updated = jObjectMap.filterKeys(_ == "data").mapValues {
-            case JArray(contexts) =>
-              JArray(contexts.map {
-                case JObject(context) => modifyAndGetValues(context, strategy, modifiedFields)
-                case x                => x
-              })
-            case JObject(unstructEvent) => modifyAndGetValues(unstructEvent, strategy, modifiedFields)
-            case x                      => x
-          }
-          JObject((jObjectMap ++ updated).toList)
-        case x => x
+      val (parsedAndSubistuted: JValue, modifiedFields: List[JsonModifiedField]) = parse(fieldValue) match {
+        case JObject(jObject) => {
+          val jObjectMap: Map[String, JValue] = jObject.toMap
+          val contextMapped: Map[String, (JValue, List[JsonModifiedField])] =
+            jObjectMap.map {
+              case (k: String, contexts: JValue) if k == "data" =>
+                (k, contexts match {
+                  case JArray(contexts) =>
+                    val updatedAndModified: List[(JValue, List[JsonModifiedField])] = contexts.map {
+                      case JObject(context) => modifyObjectIfSchemaMatches(context, strategy)
+                      case x                => (x, List.empty[JsonModifiedField])
+                    }
+                    (JArray(updatedAndModified.map(_._1)), updatedAndModified.map(_._2).flatten)
+                  case JObject(unstructEvent) => modifyObjectIfSchemaMatches(unstructEvent, strategy)
+                  case x                      => (x, List.empty[JsonModifiedField])
+                })
+              case (k: String, x: JValue) => (k, (x, List.empty[JsonModifiedField]))
+            }
+          (JObject(contextMapped.mapValues(_._1).toList), contextMapped.values.map(_._2).flatten)
+        }
+        case x => (x, List.empty[JsonModifiedField])
       }
       val rendered  = render(parsedAndSubistuted)
       val compacted = compact(rendered)
-      (compacted, modifiedFields.toList)
-    } else (null, modifiedFields.toList)
-  }
-
-  /**
-   * Modifies the object if applicable and adds to the list of modified values, if applicable.
-   */
-  private def modifyAndGetValues(context: List[(String, json4s.JValue)],
-                                 strategy: PiiStrategy,
-                                 modifiedFields: MutableList[JsonModifiedField]): JObject = {
-    val (values, listOfModifiedValues) = modifyObjectIfSchemaMatches(context, strategy)
-    modifiedFields ++= listOfModifiedValues
-    values
-  }
+      (compacted, modifiedFields)
+    } else (null, List.empty[JsonModifiedField])
 
   /**
    * Tests whether the schema for this event matches the schema criterion and if it does modifies it.
