@@ -88,8 +88,10 @@ object PiiPseudonymizerEnrichment extends ParseableEnrichment {
         if (fieldExists(field, "pojo"))
           extractString(field, "pojo", "field").flatMap(extractPiiScalarField)
         else if (fieldExists(field, "json")) extractPiiJsonField(field \ "json")
-        else s"PII Configuration: pii field does not include 'pojo' nor 'json' fields. Got: [${compact(field)}]".failure
-      case json => s"PII Configuration: pii field does not contain an object. Got: [${compact(json)}]".failure
+        else
+          s"PII Configuration: pii field does not include 'pojo' nor 'json' fields. Got: [${compact(field)}]"
+            .failure[PiiField]
+      case json => s"PII Configuration: pii field does not contain an object. Got: [${compact(json)}]".failure[PiiField]
     }.sequenceU
 
   private def extractPiiScalarField(fieldName: String): Validation[String, PiiScalar] =
@@ -203,28 +205,38 @@ final case class PiiJson(fieldMutator: Mutator, schemaCriterion: SchemaCriterion
         case JObject(jObject) => {
           val jObjectMap: Map[String, JValue] = jObject.toMap
           val contextMapped: Map[String, (JValue, List[JsonModifiedField])] =
-            jObjectMap.map {
-              case (k: String, contexts: JValue) if k == "data" =>
-                (k, contexts match {
-                  case JArray(contexts) =>
-                    val updatedAndModified: List[(JValue, List[JsonModifiedField])] = contexts.map {
-                      case JObject(context) => modifyObjectIfSchemaMatches(context, strategy)
-                      case x                => (x, List.empty[JsonModifiedField])
-                    }
-                    (JArray(updatedAndModified.map(_._1)), updatedAndModified.map(_._2).flatten)
-                  case JObject(unstructEvent) => modifyObjectIfSchemaMatches(unstructEvent, strategy)
-                  case x                      => (x, List.empty[JsonModifiedField])
-                })
-              case (k: String, x: JValue) => (k, (x, List.empty[JsonModifiedField]))
-            }
+            jObjectMap.map(mapContextTopFields(_, strategy))
           (JObject(contextMapped.mapValues(_._1).toList), contextMapped.values.map(_._2).flatten)
         }
         case x => (x, List.empty[JsonModifiedField])
       }
-      val rendered  = render(parsedAndSubistuted)
-      val compacted = compact(rendered)
+      val compacted = compact(render(parsedAndSubistuted))
       (compacted, modifiedFields)
     } else (null, List.empty[JsonModifiedField])
+
+  /**
+   * Map context top fields with strategy if they match.
+   */
+  private def mapContextTopFields(tuple: (String, json4s.JValue),
+                                  strategy: PiiStrategy): (String, (JValue, List[JsonModifiedField])) = tuple match {
+    case (k: String, contexts: JValue) if k == "data" =>
+      (k, contexts match {
+        case JArray(contexts) =>
+          val updatedAndModified: List[(JValue, List[JsonModifiedField])] =
+            contexts.map(getModifiedContext(_, strategy))
+          (JArray(updatedAndModified.map(_._1)), updatedAndModified.map(_._2).flatten)
+        case x => getModifiedContext(x, strategy)
+      })
+    case (k: String, x: JValue) => (k, (x, List.empty[JsonModifiedField]))
+  }
+
+  /**
+   * Returns a modified context or unstruct event along with a list of modified fields.
+   */
+  private def getModifiedContext(jv: JValue, strategy: PiiStrategy): (JValue, List[JsonModifiedField]) = jv match {
+    case JObject(context) => modifyObjectIfSchemaMatches(context, strategy)
+    case x                => (x, List.empty[JsonModifiedField])
+  }
 
   /**
    * Tests whether the schema for this event matches the schema criterion and if it does modifies it.
@@ -252,9 +264,10 @@ final case class PiiJson(fieldMutator: Mutator, schemaCriterion: SchemaCriterion
     val objectNode      = JsonMethods.mapper.valueToTree[ObjectNode](jValue)
     val documentContext = JJsonPath.using(JsonPathConf).parse(objectNode)
     val modifiedFields  = MutableList[JsonModifiedField]()
-    documentContext.map(jsonPath,
-                        new ScrambleMapFunction(strategy, modifiedFields, fieldMutator.fieldName, jsonPath, schema))
-    (JsonMethods.fromJsonNode(documentContext.json[JsonNode]), modifiedFields.toList)
+    val documentContext2 = documentContext.map(
+      jsonPath,
+      new ScrambleMapFunction(strategy, modifiedFields, fieldMutator.fieldName, jsonPath, schema))
+    (JsonMethods.fromJsonNode(documentContext2.json[JsonNode]), modifiedFields.toList)
   }
 }
 
@@ -267,14 +280,14 @@ private final class ScrambleMapFunction(strategy: PiiStrategy,
   override def map(currentValue: AnyRef, configuration: Configuration): AnyRef = currentValue match {
     case s: String =>
       val newValue = strategy.scramble(s)
-      modifiedFields += JsonModifiedField(fieldName, s, newValue, jsonPath, schema)
+      val _        = modifiedFields += JsonModifiedField(fieldName, s, newValue, jsonPath, schema)
       newValue
     case a: ArrayNode =>
       a.elements.asScala.map {
         case t: TextNode =>
           val originalValue = t.asText()
           val newValue      = strategy.scramble(originalValue)
-          modifiedFields += JsonModifiedField(fieldName, originalValue, newValue, jsonPath, schema)
+          val _             = modifiedFields += JsonModifiedField(fieldName, originalValue, newValue, jsonPath, schema)
           newValue
         case default: AnyRef => default
       }
